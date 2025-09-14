@@ -8,6 +8,24 @@ using { /Fortnite.com/Characters }
 using { /Fortnite.com/UI }
 using { /Verse.org/Colors }
 using { /Fortnite.com/Game }
+using { /Fortnite.com/Playspaces }
+
+
+player_ranking_data := struct:
+    Player : player
+    BestTime : float
+    Complete : int
+    Score : int
+    
+
+saved_player_data := class<persistable><final>:
+    BestTime : float = 3600.0
+    Complete : int = 0
+    Score : int = 0
+   
+    
+var SavedPlayerDataMap:weak_map(player, saved_player_data) = map{}
+
 
 StrToMsg<localizes>(String : string): message = "{String}"
 
@@ -23,13 +41,13 @@ IdxToPadding(i : int): margin=
 (Message : message).MessageToTxt(): text_block=
     return text_block{DefaultText := Message, DefaultJustification := text_justification.Center, DefaultTextSize := 25.0, DefaultTextColor := White}
 
-GetMainStackBox(Placement : []string, PlayerNames : []message, Rebirths : []string, Steals : []string, Cash : []string, PlayerIdx : int): stack_box=
+GetMainStackBox(Placement : []string, PlayerNames : []message, Complete : []string, BestTIme : []string, Score : []string, PlayerIdx : int): stack_box=
     MainStackBox := stack_box{Orientation := orientation.Horizontal}
     MainStackBox.AddWidget(stack_box_slot{Widget := GetStackBoxColumn(Placement)})
     MainStackBox.AddWidget(stack_box_slot{Widget := GetStackBoxNames(PlayerNames, PlayerIdx)})
-    MainStackBox.AddWidget(stack_box_slot{Widget := GetStackBoxColumn(Rebirths)})
-    MainStackBox.AddWidget(stack_box_slot{Widget := GetStackBoxColumn(Steals)})
-    MainStackBox.AddWidget(stack_box_slot{Widget := GetStackBoxColumn(Cash)})
+    MainStackBox.AddWidget(stack_box_slot{Widget := GetStackBoxColumn(Complete)})
+    MainStackBox.AddWidget(stack_box_slot{Widget := GetStackBoxColumn(BestTIme)})
+    MainStackBox.AddWidget(stack_box_slot{Widget := GetStackBoxColumn(Score)})
 
     return MainStackBox
     
@@ -51,7 +69,7 @@ GetStackBoxNames(Information :[]message, i : int): stack_box=
     for (Idx -> Info : Information):
         NewTextBlock := Info.MessageToTxt()
         if (i = Idx):
-            NewTextBlock.SetTextColor(Blue)
+            NewTextBlock.SetTextColor(White)
         
         set TextBlockWidgets += array{NewTextBlock}
         StackBox.AddWidget(stack_box_slot{Widget := NewTextBlock, Padding := IdxToPadding(Idx)})
@@ -85,32 +103,33 @@ scoreboard_manager := class(creative_device):
             canvas_slot{Alignment := vector2{X := 0.5, Y := 0.0}, SizeToContent := true, Widget := MainStackBox, Offsets := margin{Top := -0.0, Left := -320.0}, Anchors := anchors{Minimum := vector2{X := 1.0, Y := 0.0}, Maximum := vector2{X := 1.0, Y := 0.0}}}
         }
     (Players : []player).GetPlayerIdx(Player : player): int=
-        for (i -> Playr : Players, Player = Playr):
+        for (i -> Play : Players, Player = Play):
             return i
         return -1
 
     PlayerNamesMessage<localizes>: message = {"Player Name"}
+
     MainLoop()<suspends>: void=
         loop:
             var Placements : []string = array{""}
             var PlayerNames : []message = array{PlayerNamesMessage}
-            var Rebirths : []string = array{"Rebirths"}
-            var Steals : []string = array{"Steals"}
-            var Cash : []string = array{"Cash"}
+            var Complete : []string = array{"Complete"}
+            var BestTime : []string = array{"BestTime"}
+            var Score : []string = array{"Score"}
             SortedPlayers := GetSortedPlayerRankings(GetPlayspace())
             for (Idx -> Player : SortedPlayers, Player.IsActive[]):
                 Data := GetPersistentData(Player)
                 set Placements += array{"#{Idx + 1}"}
                 set PlayerNames += array{AgentToMsg(Player)}
-                set Rebirths += array{"{Data.Rebirths}"}
-                set Steals += array{"{Data.Steals}"}
-                set Cash += array{"{baggas_utils.Format(Data.Cash)}"}
-                CashHudMessage.Show(Player, StrToMsg("$ {baggas_utils.Format(Data.Cash)}"))
+                set Complete += array{"{Data.Complete}"}
+                set Score += array{"{Data.Score}"}
+                
+                
 
             
             for (Player -> Canvas : PlayersMap, PlayerUI := GetPlayerUI[Player]):
                 PlayerIdx := SortedPlayers.GetPlayerIdx(Player)
-                MainStackBox := GetMainStackBox(Placements, PlayerNames, Rebirths, Steals, Cash, PlayerIdx+1)
+                MainStackBox := GetMainStackBox(Placements, PlayerNames, Complete, BestTime, Score, PlayerIdx+1)
                 
                 PlayerUI.RemoveWidget(Canvas)
                 MainCanvas := GetCanvas(MainStackBox)
@@ -118,6 +137,86 @@ scoreboard_manager := class(creative_device):
                 PlayerUI.AddWidget(MainCanvas)
 
             Sleep(0.2)
+
+    GetSortedPlayerRankings(Playspace : fort_playspace) : []player =
+        var PlayerData : []player_ranking_data = array{}
+    
+        # Collect player data
+        for (Player : Playspace.GetPlayers()):
+            Data1 := GetPersistentData(Player)
+            Data := player_ranking_data{
+                Player := Player,
+                BestTime := Data1.BestTime,
+                Complete := Data1.Complete,
+                Score := Data1.Score
+            }
+            set PlayerData += array{Data}
+    
+        # Sort the data
+        SortedData := MergeSortPlayerRankings(PlayerData)
+        var SortedPlayers : []player = array{}
+        for (Data : SortedData):
+            set SortedPlayers += array{Data.Player}
+    
+        # Reverse the sorted players array
+        var Players : []player = array{}
+        for (Idx := 0..SortedPlayers.Length - 1):
+            if (Player1 := SortedPlayers[SortedPlayers.Length - 1 - Idx]):
+                set Players += array{Player1}
+    
+        return Players
+
+    MergeSortPlayerRankings(Data : []player_ranking_data) : []player_ranking_data =
+        if (Data.Length <= 1):
+            Data
+        else:
+            var Middle : int = 0
+            if (FloorResult := Floor[Data.Length * 1.0 / 2.0]):
+                set Middle = FloorResult
+            var Left : []player_ranking_data = array{}
+            var Right : []player_ranking_data = array{}
+            if (LeftSlice := Data.Slice[0, Middle]):
+                set Left = LeftSlice
+            if (RightSlice := Data.Slice[Middle, Data.Length]):
+                set Right = RightSlice
+            SortedLeft := MergeSortPlayerRankings(Left)
+            SortedRight := MergeSortPlayerRankings(Right)
+            MergePlayerRankings(SortedLeft, SortedRight)
+
+    MergePlayerRankings(Left : []player_ranking_data, Right : []player_ranking_data) : []player_ranking_data =
+        var Result : []player_ranking_data = array{}
+        var LeftIndex : int = 0
+        var RightIndex : int = 0
+    
+        loop:
+            if (LeftIndex >= Left.Length and RightIndex >= Right.Length):
+                break
+    
+            if (LeftIndex < Left.Length and RightIndex < Right.Length):
+                if (ComparePlayerRankings(Left[LeftIndex], Right[RightIndex]) = true):
+                    if (LeftElement := Left[LeftIndex]):
+                        set Result += array{LeftElement}
+                    set LeftIndex += 1
+                else:
+                    if (RightElement := Right[RightIndex]):
+                        set Result += array{RightElement}
+                    set RightIndex += 1
+            else if (LeftIndex < Left.Length):
+                if (LeftElement := Left[LeftIndex]):
+                    set Result += array{LeftElement}
+                set LeftIndex += 1
+            else if (RightElement := Right[RightIndex]):
+                set Result += array{RightElement}
+                set RightIndex += 1
+    
+        Result
+
+    ComparePlayerRankings(A : player_ranking_data, B : player_ranking_data)<transacts> : logic =
+        if (A.Score < B.Score):
+            true
+        else:
+            false
+        
 
     OnBegin<override>()<suspends>: void=
         spawn. MainLoop()
